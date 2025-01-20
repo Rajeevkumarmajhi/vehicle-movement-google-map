@@ -1,0 +1,1 @@
+This file is an example for drawing polygon route and google arrow marker to move on the route path smoothly with displaying time, latitude, longitude location and also address of the current marker position
