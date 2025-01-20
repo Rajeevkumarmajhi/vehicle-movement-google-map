@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vehicle Tracker</title>
+
+    <style>
+        /* Set map height and width */
+        #map {
+            height: 500px;
+            width: 100%;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>Tracking Vehicle: {{ $device->name }}</h1>
+    <div id="map"></div>
+    <p id="location-name"><strong>Location:</strong> Fetching...</p>
+
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"
+        integrity="sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo=" crossorigin="anonymous"></script>
+
+    <script>
+        window.initMap = function () {
+            const routeCoordinates = @json($positions); // Data passed from Laravel
+            let currentIndex = 0;
+
+            const mapCenter = {
+                lat: routeCoordinates[0].latitude,
+                lng: routeCoordinates[0].longitude
+            };
+
+            // Initialize the map
+            const map = new google.maps.Map(document.getElementById('map'), {
+                zoom: 20, 
+                center: mapCenter,
+            });
+
+            // Create a vehicle marker
+            const vehicleMarker = new google.maps.Marker({
+                position: mapCenter,
+                map: map,
+                icon: {
+                    path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+                    scale: 5,
+                    fillColor: "red",
+                    fillOpacity: 1,
+                    strokeWeight: 1,
+                    rotation: 0,
+                    anchor: new google.maps.Point(0, 2.5),
+                },
+            });
+
+            // Create InfoWindow for displaying data
+            const infoWindow = new google.maps.InfoWindow();
+
+            vehicleMarker.addListener('click', function () {
+                const currentData = routeCoordinates[currentIndex];
+                const content = `
+                    <div>
+                        <p><strong>Latitude:</strong> ${currentData.latitude}</p>
+                        <p><strong>Longitude:</strong> ${currentData.longitude}</p>
+                        <p><strong>Time:</strong> ${currentData.time}</p>
+                        <p><strong>Speed:</strong> ${currentData.speed} km/h</p>
+                    </div>
+                `;
+                infoWindow.setContent(content);
+                infoWindow.open(map, vehicleMarker);
+
+                fetchLocationName(currentData.latitude, currentData.longitude);
+            });
+
+            // Fetch the location name from latitude and longitude
+            function fetchLocationName(lat, lng) {
+                const geocoder = new google.maps.Geocoder();
+                geocoder.geocode({ location: { lat, lng } }, (results, status) => {
+                    if (status === "OK" && results[0]) {
+                        document.getElementById("location-name").innerHTML =
+                            `<strong>Location:</strong> ${results[0].formatted_address}`;
+                    } else {
+                        document.getElementById("location-name").innerHTML =
+                            `<strong>Location:</strong> Unable to fetch location`;
+                    }
+                });
+            }
+
+            // Fetch location on initial load
+            fetchLocationName(mapCenter.lat, mapCenter.lng);
+
+            // Fetch location name every 10 seconds
+            setInterval(() => {
+                const position = vehicleMarker.getPosition();
+                fetchLocationName(position.lat(), position.lng());
+            }, 10000); // 10000ms = 10 seconds
+
+            // Create a Polyline for the route
+            const routePath = new google.maps.Polyline({
+                path: routeCoordinates.map(coord => ({ lat: coord.latitude, lng: coord.longitude })),
+                geodesic: true,
+                strokeColor: '#0000FF',
+                strokeOpacity: 1.0,
+                strokeWeight: 3,
+                map: map
+            });
+
+            // Function to calculate the bearing between two points
+            function getBearing(start, end) {
+                const startLat = start.latitude * Math.PI / 180;
+                const startLng = start.longitude * Math.PI / 180;
+                const endLat = end.latitude * Math.PI / 180;
+                const endLng = end.longitude * Math.PI / 180;
+
+                const deltaLng = endLng - startLng;
+                const y = Math.sin(deltaLng) * Math.cos(endLat);
+                const x = Math.cos(startLat) * Math.sin(endLat) -
+                    Math.sin(startLat) * Math.cos(endLat) * Math.cos(deltaLng);
+                return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+            }
+
+            // Function to animate vehicle movement
+            function animateVehicleMovement(start, end, vehicleMarker) {
+                const duration = 2000; 
+                const interval = 20;
+                const steps = duration / interval;
+                let step = 0;
+
+                const bearing = getBearing(start, end);
+
+                const animate = () => {
+                    step++;
+                    const lat = start.latitude + (end.latitude - start.latitude) * (step / steps);
+                    const lng = start.longitude + (end.longitude - start.longitude) * (step / steps);
+                    const newPosition = new google.maps.LatLng(lat, lng);
+
+                    vehicleMarker.setPosition(newPosition);
+                    vehicleMarker.setIcon({
+                        path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+                        scale: 5,
+                        fillColor: "red",
+                        fillOpacity: 1,
+                        strokeWeight: 1,
+                        rotation: bearing,
+                        anchor: new google.maps.Point(0, 2.5),
+                    });
+
+                    map.setCenter(newPosition);
+
+                    // Update InfoWindow dynamically
+                    infoWindow.setContent(`
+                        <div>
+                            <p><strong>Latitude:</strong> ${lat.toFixed(6)}</p>
+                            <p><strong>Longitude:</strong> ${lng.toFixed(6)}</p>
+                            <p><strong>Time:</strong> ${routeCoordinates[currentIndex].time}</p>
+                            <p><strong>Speed:</strong> ${routeCoordinates[currentIndex].speed} km/h</p>
+                        </div>
+                    `);
+
+                    if (step < steps) setTimeout(animate, interval);
+                };
+
+                animate();
+            }
+
+            // Function to move the vehicle along the route
+            function moveVehicle() {
+                if (currentIndex < routeCoordinates.length - 1) {
+                    const start = routeCoordinates[currentIndex];
+                    const end = routeCoordinates[currentIndex + 1];
+
+                    animateVehicleMovement(start, end, vehicleMarker);
+                    currentIndex++;
+
+                    setTimeout(moveVehicle, 2000);
+                }
+            }
+
+            moveVehicle();
+        };
+    </script>
+
+    <!-- Load Google Maps API -->
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAXegQvjmVQNgtqFAO3sqSshdXaDtkDH5g&callback=initMap" async defer></script>
+
+</body>
+
+</html>
